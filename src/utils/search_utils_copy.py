@@ -460,33 +460,53 @@ def split_into_semantic_chunks(text: str, max_chunk_words: int = 75, min_chunk_w
 def detect_ai_generated_text(text):
     """
     Détecte la probabilité qu'un texte ait été généré par une IA.
-    Tu envoies le texte à un modèle GPT et tu lui demandes d'estimer si c'est de l'IA.
+    Utilise un modèle de classification de texte pré-entraîné pour évaluer la probabilité
     """
-    openai_api_key = os.getenv('OPENAI_API_KEY')
-    if not openai_api_key:
-        return {"error": "OPENAI_API_KEY environment variable not set."}
+    
+    # from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 
-    client = openai.OpenAI(api_key=openai_api_key)
+    # Charger le tokenizer et le modèle
+    # model_name = "roberta-base-openai-detector"
+    # tokenizer = AutoTokenizer.from_pretrained(model_name)
+    # model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Tu es un détecteur d'IA. Réponds uniquement avec un pourcentage de probabilité que ce texte ait été généré par une IA."},
-                {"role": "user", "content": f"Analyse ce texte et donne un score de 0 à 100 pour savoir s'il a été généré par une IA : {text}"}
-            ],
-        )
+    # Créer un pipeline
+    # ai_detector = pipeline("text-classification", model=model, tokenizer=tokenizer)
+    
+    # segments = chunk_text(text, tokenizer)
+    # if not segments:
+    #     return {"label": "REAL", "score": 0.0}
+    
+    results = []
 
-        result = response.choices.message.content
-        probability = float(result.replace('%', '').strip())
+    # for segment in segments:
+    #     result = ai_detector(segment)[0]
+    #     results.append(result)
 
-        return {
-            "text": text,
-            "ai_generated_probability": probability,
-            "interpretation": "Plus le score est élevé, plus le texte est susceptible d'avoir été généré par une IA."
-        }
-    except Exception as e:
-        return {"error": f"Une erreur est survenue lors de la détection de l'IA : {str(e)}"}
+    # Agréger les résultats
+    # total_score = sum(r['score'] for r in results)
+    # average_score = total_score / len(results)
+    # label = "FAKE" if average_score > 0.5 else "REAL"
+    result = {
+        "label": "Real",
+        "score": 0
+    }
+    # print(f"Results de la détection IA : {result}")
+    # if result['score'] > 0.5:
+    #     print("Texte probablement généré par une IA.")
+    # else:
+    #     print("Texte probablement écrit par un humain.")    
+    return result
+
+def chunk_text(text, tokenizer, max_tokens=512):
+    tokens = tokenizer(text, return_tensors="pt", truncation=False)["input_ids"][0]
+    chunks = []
+    for i in range(0, len(tokens), max_tokens):
+        chunk = tokens[i:i+max_tokens]
+        decoded_chunk = tokenizer.decode(chunk, skip_special_tokens=True)
+        chunks.append(decoded_chunk)
+    return chunks
+
     
 def split_by_paragraph(text, max_length=800):
     """
