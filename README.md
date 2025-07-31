@@ -29,10 +29,11 @@ To set up the project, follow these steps:
 2. Install the required dependencies:
    ```
    pip install -r requirements.txt
+   python -m spacy download fr_core_news_sm
    ```
 
 ## Usage
-
++h
 1. Start the Flask application:
    ```
    python src/api_flask.py
