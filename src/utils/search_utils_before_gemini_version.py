@@ -6,19 +6,21 @@ import os
 from dotenv import load_dotenv
 from difflib import SequenceMatcher
 import spacy
+import torch
 
 # Charge les variables d'environnement depuis le fichier.env
 load_dotenv()
 
-# Charger le modèle spaCy une seule fois au début du script
-# Choisissez le modèle approprié (fr_core_news_sm pour le français, en_core_web_sm pour l'anglais)
-# Assurez-vous que le modèle est téléchargé (ex: python -m spacy download fr_core_news_sm)
 try:
     nlp_spacy = spacy.load('fr_core_news_sm')
 except OSError:
     print("Le modèle spaCy 'fr_core_news_sm' n'est pas trouvé. Téléchargement en cours...")
     spacy.cli.download("fr_core_news_sm")
     nlp_spacy = spacy.load('fr_core_news_sm')
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model.to(device)
 
 def extract_with_context(full_text, target_sentence, data_id=None, window=1):
     """
@@ -215,44 +217,27 @@ def is_cited_by_footnote(sentence, footnotes):
 
 # Détection de citation plus robuste avec spaCy
 def is_cited_with_nlp(sentence_text):
-    """
-    Essaie de détecter si une phrase est introduite par des marqueurs de citation
-    classiques comme "Selon", "D'après", ou contient des formats de citation courants.
-    Utilise spaCy pour une analyse syntaxique et de reconnaissance d'entités.
-    """
     doc = nlp_spacy(sentence_text)
 
-    # Règle 1: Détection de formats de citation courants (ex: (Auteur, Année), [Numéro])
     if re.search(r'\([A-Za-z\s,]+\s*\d{4}\)|\(\d{4}\)|\[\d+\]', sentence_text):
         return True
 
-    # Règle 2: Verbes introducteurs de citation suivis d'un nom propre ou d'une organisation
     for token in doc:
         # Vérifier les lemmes des verbes introducteurs
         if token.lemma_.lower() in ["selon", "d'après", "déclarer", "affirmer", "citer", "rapporter", "indiquer", "montrer"]:
-            # Vérifier si le verbe est suivi d'une entité nommée (PERSON, ORG) ou d'un nom propre
             for next_token in doc[token.i+1:]:
                 if next_token.ent_type_ in {"PER", "ORG", "LOC", "MISC"} or next_token.pos_ == "PROPN":
                     return True
-                # Arrêter de chercher si on rencontre une ponctuation majeure ou un autre verbe
                 if next_token.is_punct and next_token.text in ['.', ';', '!', '?']:
                     break
                 if next_token.pos_ == "VERB":
                     break
     return False
 
-
 def compare_with_search_results(text):
-    """
-    La fonction principale pour la détection de plagiat!
-    Elle utilise l'API Serper (pour les résultats Google) et un modèle de Sentence Transformer
-    pour comparer le texte avec des extraits trouvés en ligne.
-    """
     serper_api_key = os.getenv('SERPER_API_KEY')
     if not serper_api_key:
         return {"error": "API Key SERPER manquante."}
-
-    model = SentenceTransformer('all-MiniLM-L6-v2')
 
     all_results = []
     excerpts = []
@@ -292,43 +277,64 @@ def compare_with_search_results(text):
         doc_segment = nlp_spacy(segment)
         sentences = [sent.text for sent in doc_segment.sents]
 
-        processed_sentences = []
-        if not search_results:
+        # --- Début des modifications pour la gestion de la mémoire ---
+        # Collecter tous les textes à encoder
+        texts_to_embed = sentences + [result.get('snippet', '') for result in search_results if result.get('snippet', '')]
+        texts_to_embed = [t for t in texts_to_embed if t]
+
+        if not texts_to_embed:
             continue
-        for sent_text in sentences:
-            doc_sent = nlp_spacy(sent_text)
-            # Lemmatisation et suppression des mots vides pour la normalisation
-            cleaned_tokens = [token.lemma_.lower() for token in doc_sent if token.is_alpha and not token.is_stop] # [3, 9, 10, 11]
-            processed_sentences.append(" ".join(cleaned_tokens))
 
-        sentence_embeddings = model.encode(processed_sentences, convert_to_tensor=True)
+        # Définir une taille de sous-lot. Ajustez cette valeur si l'erreur de mémoire persiste.
+        sub_batch_size = 1000 
+        all_embeddings = []
 
-        for result in search_results:
-            snippet = result.get('snippet', '')
-            title = result.get('title', '')
-            link = result.get('link', '')
-            print(f"Serper results : \n {snippet}")
+        # Boucle pour encoder par sous-lots
+        for i in range(0, len(texts_to_embed), sub_batch_size):
+            sub_batch_texts = texts_to_embed[i:i + sub_batch_size]
+            try:
+                sub_batch_embeddings = model.encode(sub_batch_texts, convert_to_tensor=True, device=device)
+                all_embeddings.append(sub_batch_embeddings)
+            except RuntimeError as e:
+                print(f"Erreur de mémoire lors de l'encodage du sous-lot. Réduire la taille du sous-lot ou revoir la taille du segment. Erreur: {e}")
+                all_embeddings = None
+                break
 
-            if not snippet:
+        if all_embeddings is None:
+            continue
+
+        all_embeddings = torch.cat(all_embeddings, dim=0)
+        # Séparation des embeddings du document et des snippets
+        num_sentences = len(sentences)
+        sentence_embeddings_matrix = all_embeddings[:num_sentences]
+        snippet_embeddings_matrix = all_embeddings[num_sentences:]
+
+        for i, sentence in enumerate(sentences):
+            if i >= len(sentence_embeddings_matrix):
                 continue
+            
+            if is_ignorable(sentence):
+                continue
+            
+            if sentence in seen_phrases:
+                continue
+            
+            if len(sentence.split()) < 5 or len(sentence) < 40:
+                continue
+            
+            if len(snippet_embeddings_matrix) > 0:
+                # Utilisation de util.pytorch_cos_sim
+                similarities = util.pytorch_cos_sim(sentence_embeddings_matrix[i], snippet_embeddings_matrix).cpu().numpy().flatten() * 100
+            else:
+                similarities = []
 
-            snippet_embedding = model.encode(snippet, convert_to_tensor=True)
+            for j, similarity in enumerate(similarities):
+                if similarity > 60 and not is_cited_with_nlp(sentence) and not is_cited_by_footnote(sentence, footnotes) and not is_covered_by_bibliography(sentence, references):
+                    # Trouver le résultat Serper correspondant
+                    corresponding_result = search_results[j]
+                    title = corresponding_result.get('title', '')
+                    link = corresponding_result.get('link', '')
 
-            for i, sentence in enumerate(sentences):
-                processed_sentence = processed_sentences[i]
-
-                if is_ignorable(sentence):
-                    continue
-                
-                if sentence in seen_phrases:
-                    continue
-                
-                if len(sentence.split()) < 5 or len(sentence) < 40:
-                    continue
-
-                similarity = util.pytorch_cos_sim(sentence_embeddings[i], snippet_embedding).item() * 100 # [5, 6, 7, 8]
-
-                if similarity > 60 and not is_cited_with_nlp(sentence) and not is_cited_by_footnote(sentence, footnotes) and not is_covered_by_bibliography(sentence, references): # [2, 4]
                     if sentence in highlighted_text:
                         data_id = len(all_results)
                         span_tag = f"<span class='plagiarized' data-id='{data_id}'>{sentence}</span>"
@@ -372,34 +378,12 @@ def compare_with_search_results(text):
     }
 
 def split_into_semantic_chunks(text: str, max_chunk_words: int = 75, min_chunk_words: int = 15) -> list[str]:
-    """
-    Découpe un texte en segments sémantiques (chunks de phrases) pour une détection
-    de similarités plus efficace.
-
-    Cette fonction privilégie la segmentation au niveau de la phrase en utilisant spaCy.
-    Les phrases sont ensuite regroupées en "chunks" qui respectent une taille maximale
-    (en mots) pour garantir la granularité sans perdre trop de contexte.
-
-    Args:
-        text (str): Le texte complet à découper.
-        max_chunk_words (int): Nombre maximal de mots souhaité par segment.
-                                Un bon compromis est souvent entre 50 et 100 mots.
-        min_chunk_words (int): Nombre minimal de mots pour qu'un chunk soit finalisé
-                                avant d'ajouter une nouvelle phrase, évitant des
-                                chunks trop petits isolés.
-
-    Returns:
-        list[str]: Une liste de chaînes de caractères, chaque chaîne étant un segment.
-    """
     if not text.strip():
         return []
 
     sentences = []
     if nlp_spacy is None:
-        # Fallback si spaCy n'est pas chargé : division basique par ponctuation.
-        # Moins robuste pour la délimitation de phrases complexes.
         print("Avertissement : spaCy non disponible. Utilisation d'une division basique par phrase.")
-        # Utilise lookbehind pour inclure le délimiteur dans la phrase, puis strip()
         temp_sentences = re.split(r'(?<=[.!?])\s+', text)
         sentences = [s.strip() for s in temp_sentences if s.strip()]
     else:
@@ -438,11 +422,6 @@ def split_into_semantic_chunks(text: str, max_chunk_words: int = 75, min_chunk_w
                         current_chunk_word_count += len(part.split())
                 continue
             
-            # Vérifie si l'ajout de la phrase actuelle dépasserait la taille maximale du chunk
-            # ET si le chunk actuel a déjà atteint une taille minimale raisonnable.
-            # Cela permet de ne pas couper une phrase en deux et de laisser un chunk grandir
-            # un peu au-delà de max_chunk_words si la dernière phrase le rend juste plus grand,
-            # mais de forcer une coupure si le chunk est déjà assez grand.
             if (current_chunk_word_count + sentence_words > max_chunk_words) and (current_chunk_word_count >= min_chunk_words):
                 segments.append(" ".join(current_chunk_sentences))
                 current_chunk_sentences = [sentence]
@@ -451,17 +430,12 @@ def split_into_semantic_chunks(text: str, max_chunk_words: int = 75, min_chunk_w
                 current_chunk_sentences.append(sentence)
                 current_chunk_word_count += sentence_words
 
-        # Ajoute le dernier chunk s'il reste du texte
         if current_chunk_sentences:
             segments.append(" ".join(current_chunk_sentences))
 
     return segments
 
 def detect_ai_generated_text(text):
-    """
-    Détecte la probabilité qu'un texte ait été généré par une IA.
-    Tu envoies le texte à un modèle GPT et tu lui demandes d'estimer si c'est de l'IA.
-    """
     openai_api_key = os.getenv('OPENAI_API_KEY')
     if not openai_api_key:
         return {"error": "OPENAI_API_KEY environment variable not set."}
@@ -487,23 +461,3 @@ def detect_ai_generated_text(text):
         }
     except Exception as e:
         return {"error": f"Une erreur est survenue lors de la détection de l'IA : {str(e)}"}
-    
-def split_by_paragraph(text, max_length=800):
-    """
-    Découpe le texte en segments basés sur les paragraphes (double saut de ligne).
-    C'est généralement une meilleure approche que de découper par ligne, car les paragraphes
-    maintiennent mieux la cohérence sémantique. Les segments ne dépasseront pas 'max_length'.
-    """
-    paragraphs = text.split("\n\n")
-    segments = []
-    current = ""
-
-    for para in paragraphs:
-        if len(current) + len(para) < max_length:
-            current += para + "\n\n"
-        else:
-            segments.append(current.strip())
-            current = para + "\n\n"
-    if current:
-        segments.append(current.strip())
-    return segments

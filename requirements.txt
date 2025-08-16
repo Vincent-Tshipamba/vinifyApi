@@ -4,3 +4,5 @@ transformers
 torch
 requests
 spacy
+python-docx
+sentence_transformers
