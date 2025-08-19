@@ -4,5 +4,6 @@ transformers
 torch
 requests
 spacy
+dotenv
 python-docx
 sentence_transformers

@@ -4,6 +4,7 @@ from utils.search_utils_gemini_version import analyze_document_with_gemini, extr
 from dotenv import load_dotenv
 import logging
 import os
+import re
 
 load_dotenv()
 
@@ -24,18 +25,21 @@ def check_plagiarism():
     if not file:
         return jsonify({'error': 'No file provided'}), 400
     
+    safe_filename = re.sub(r'[^a-zA-Z0-9_.\-]', '_', file.filename)
     temp_dir = 'temp_uploads'
     os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, file.filename)
+    temp_path = os.path.join(temp_dir, safe_filename)
     file.save(temp_path)
     
     full_text = None
     try:
+        # Exemple d'utilisation dans votre logique existante
         # Étape 1 : Extraire le texte du fichier sauvegardé
         full_text = extract_text_from_file(temp_path)
+        cleaned_document_text = clean_text_for_json(full_text)
 
         # Étape 2 : Lancer le checker principal avec le texte extrait
-        response = main_plagiarism_checker(full_text)
+        response = main_plagiarism_checker(cleaned_document_text)
         
         logging.info(f"Plagiarism check completed for {file.filename}. Response: {response}")
 
@@ -43,7 +47,9 @@ def check_plagiarism():
         os.remove(temp_path)
         logging.info(f"Deleted local file {temp_path}.")
 
-        return jsonify(response)
+        return jsonify({
+            'similarities': response,
+        })
     except Exception as e:
         logging.error(f"An unexpected error occurred: {str(e)}")
         if os.path.exists(temp_path):
@@ -120,6 +126,13 @@ def extract_docx():
 #         "label": result["label"],
 #         "score": round(result["score"], 2)
 #     })
+
+def clean_text_for_json(text):
+    """
+    Nettoie le texte pour éviter les erreurs d'échappement JSON.
+    Remplace les anti-slash non-échappés par des anti-slash correctement échappés.
+    """
+    return text.replace('\\', '\\\\')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
