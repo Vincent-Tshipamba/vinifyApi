@@ -1,9 +1,8 @@
-Flask
-PyPDF2
-transformers
+flask
+sentence-transformers
 torch
-requests
 spacy
-dotenv
-python-docx
-sentence_transformers
+faiss-cpu
+numpy
+python-dotenv
+gunicorn

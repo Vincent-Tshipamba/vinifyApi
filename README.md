@@ -22,8 +22,8 @@ To set up the project, follow these steps:
 
 1. Clone the repository:
    ```
-   git clone <repository-url>
-   cd plagiarism_detection_app
+   git clone https://github.com/Vincent-Tshipamba/vinifyApi.git
+   cd vinifyApi
    ```
 
 2. Install the required dependencies:
@@ -41,7 +41,7 @@ To set up the project, follow these steps:
 
 2. Use a tool like Postman or cURL to send a POST request to the `/check-plagiarism` endpoint with the following parameters:
    - `pdf_file`: The PDF file to check for plagiarism.
-   - `serper_api_key`: Your API key for the search service.
+   <!-- - `serper_api_key`: Your API key for the search service. -->
    - `query`: (Optional) A query string to refine the search.
 
 ## API Endpoints
@@ -56,3 +56,10 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
+## Hugging Face Token (Recommended)
+To avoid unauthenticated HF Hub warnings and get higher rate limits, set:
+
+```bash
+set HF_TOKEN=your_hf_token_here
+```
+
