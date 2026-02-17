@@ -1,0 +1,9 @@
+Flask
+transformers
+torch
+requests
+spacy
+dotenv
+sentence_transformers
+huggingface_hub
+ 

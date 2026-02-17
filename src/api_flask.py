@@ -1,138 +1,73 @@
-from flask import Flask, request, jsonify
-from docx import Document
-from utils.search_utils_gemini_version import analyze_document_with_gemini, extract_text_from_file, main_plagiarism_checker
-from dotenv import load_dotenv
-import logging
-import os
-import re
+﻿# from flask import Flask, request, jsonify
+# from utils.search_utils import compare_with_search_results
+# from dotenv import load_dotenv
+# import logging
+# import os
 
-load_dotenv()
+# load_dotenv()
 
-app = Flask(__name__)
+# app2 = Flask(__name__)
+# logging.basicConfig(level=logging.DEBUG)
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
+# plagiarism_engine = AcademicPlagiarismEngine(
+#     embedding_model_name="paraphrase-multilingual-MiniLM-L12-v2",
+#     semantic_threshold=70.0
+# )
 
-@app.route('/', methods=['GET'])
-def voir_sur_web():
-    return jsonify({'salutation': 'hello'})
 
-@app.route('/check-plagiarism', methods=['POST'])
-def check_plagiarism():
-    logging.info("🔍 Requête reçue par l’API Flask")
-    
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'error': 'No file provided'}), 400
-    
-    safe_filename = re.sub(r'[^a-zA-Z0-9_.\-]', '_', file.filename)
-    temp_dir = 'temp_uploads'
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, safe_filename)
-    file.save(temp_path)
-    
-    full_text = None
-    try:
-        # Exemple d'utilisation dans votre logique existante
-        # Étape 1 : Extraire le texte du fichier sauvegardé
-        full_text = extract_text_from_file(temp_path)
-        cleaned_document_text = clean_text_for_json(full_text)
+# @app.route('/', methods=['GET'])
+# def voir_sur_web():
+#     return jsonify({'salutation': 'hello'})
 
-        # Étape 2 : Lancer le checker principal avec le texte extrait
-        response = main_plagiarism_checker(cleaned_document_text)
-        
-        logging.info(f"Plagiarism check completed for {file.filename}. Response: {response}")
 
-        # Étape 3 : Supprimer le fichier temporaire
-        os.remove(temp_path)
-        logging.info(f"Deleted local file {temp_path}.")
-
-        return jsonify({
-            'similarities': response,
-        })
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {str(e)}")
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
-            logging.info(f"Deleted local file {temp_path} after error.")
-        return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 # @app.route('/check-plagiarism', methods=['POST'])
 # def check_plagiarism():
-#     print("🔍 Requête reçue par l’API Flask")
-#     data = request.get_json()
-#     text = data.get('text')
-#     logging.debug(f"Received text: {text}")
-
-#     if not text:
-#         logging.error("Missing text")
-#         return jsonify({'error': 'Missing text'}), 400
+#     logging.info('Request received by Flask API (/check-plagiarism)')
 
 #     try:
-#         if not text.strip():
-#             logging.error("No text provided")
-#             return jsonify({'error': 'No text provided'}), 400
+#         payload = request.get_json(silent=True) or {}
 
-#         # Vérification de similarité
-#         similarities = compare_with_search_results(text)
+#         document_text = (
+#             payload.get('document_text')
+#             or payload.get('text')
+#             or payload.get('content')
+#             or ''
+#         )
+#         source_documents = payload.get('source_documents') or []
 
-#         if "error" in similarities:
-#             logging.error(f"Erreur pendant la détection : {similarities['error']}")
-#             return jsonify({'error': similarities["error"]}), 500
+#         if not isinstance(document_text, str) or not document_text.strip():
+#             return jsonify({'error': 'Missing document_text'}), 400
 
-#         # Détection de texte généré par l'IA
-#         # ai_generated_probability = detect_ai_generated_text(text)
-#         label = 'Real'
-        
-#         if label in ['fake', 'Fake', 'FAKE']:
-#             is_ai_generated = True
-#         else:
-#             is_ai_generated = False
+#         if not isinstance(source_documents, list) or len(source_documents) == 0:
+#             return jsonify({'error': 'Missing source_documents (corpus)'}), 400
 
-#         return jsonify({
-#             'similarities': similarities,
-#             'is_ai_generated': is_ai_generated,
-#             'ai_generated_label': label,
-#             'ai_generated_probability': 0,
-#         })
+#         result = plagiarism_engine.compare_document_against_corpus(
+#             document_text=document_text.strip(),
+#             corpus_documents=source_documents
+#         )
+#         return jsonify({'similarities': response}), 200
 
 #     except Exception as e:
-#         logging.error(f"An error occurred: {str(e)}")
-#         return jsonify({'error': f'An error occurred: {str(e)}'}), 500
-
-@app.route('/extract-text/docx', methods=['POST'])
-def extract_docx():
-    file = request.files.get('file')
-    print("Fichier reçu :", file.filename)
-    if not file:
-        return jsonify({"error": "Aucun fichier envoyé."}), 400
-
-    try:
-        document = Document(file)
-        text = '\n'.join([para.text for para in document.paragraphs if para.text.strip()])
-        return jsonify({"text": text.strip()}), 200
-    except Exception as e:
-        return jsonify({"error": f"Erreur lors de l'extraction : {str(e)}"}), 500
+#         logging.exception('check_plagiarism failed')
+#         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 
-# @app.route('/detect-ai', methods=['POST'])
-# def detect_ai():
-#     data = request.get_json()
-#     text = data.get('text')
-#     if not text:
-#         return jsonify({"error": "Texte manquant"}), 400
-    
-#     result = detect_ai_generated_text(text)
-#     return jsonify({
-#         "label": result["label"],
-#         "score": round(result["score"], 2)
-#     })
+# @app.route('/extract-text/docx', methods=['POST'])
+# def extract_docx():
+#     file = request.files.get('file')
+#     if not file:
+#         return jsonify({'error': 'Aucun fichier envoye.'}), 400
 
-def clean_text_for_json(text):
-    """
-    Nettoie le texte pour éviter les erreurs d'échappement JSON.
-    Remplace les anti-slash non-échappés par des anti-slash correctement échappés.
-    """
-    return text.replace('\\', '\\\\')
+#     try:
+#         document = Document(file)
+#         text = '\n'.join([para.text for para in document.paragraphs if para.text.strip()])
+#         return jsonify({'text': text.strip()}), 200
+#     except Exception as e:
+#         return jsonify({'error': f'Erreur lors de l extraction: {str(e)}'}), 500
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+
+# if __name__ == '__main__':
+#     host = os.getenv('FLASK_HOST', '127.0.0.1')
+#     port = int(os.getenv('FLASK_PORT', '5050'))
+#     debug = os.getenv('FLASK_DEBUG', '1') == '1'
+#     app.run(host=host, port=port, debug=debug, use_reloader=False)
